@@ -163,13 +163,9 @@ const getFeedback = async (req, res) => {
     });
   });
 
-  try {
-    const results = await Promise.all(workers);
-    const processedFeedbacks = results.flat();
-    res.json(processedFeedbacks);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  const results = await Promise.all(workers);
+  const processedFeedbacks = results.flat();
+  res.json(processedFeedbacks);
 };
 
 module.exports = { processFeedback, getFeedback };

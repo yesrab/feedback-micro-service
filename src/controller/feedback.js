@@ -90,6 +90,41 @@ const processFeedback = async (req, res) => {
 //   res.json(processedFeedbacks);
 // };
 
+const getFeedback = async (req, res) => {
+  const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  const response = await fetch(feedbackRequest);
+  console.log(response.status);
+  const { data: feedbacks = [] } = await response.json();
+  const feedbackIds = feedbacks.map((item) => item.idx);
+  const [associations] = await Promise.all([
+    Associations.find({ feedbacks: { $in: feedbackIds } }).select(
+      "name email feedbacks"
+    ),
+  ]);
+  const feedbackIdToAssociation = new Map();
+  associations.forEach(({ name, email, feedbacks }) => {
+    feedbacks.forEach((feedbackId) => {
+      feedbackIdToAssociation.set(feedbackId, { name, email });
+    });
+  });
+  const processedFeedbacks = feedbacks.map(
+    ({ name, description, idx, topics = [] }) => ({
+      name,
+      description,
+      idx,
+      topics: topics.map((topic) => topic.name),
+      association: feedbackIdToAssociation.get(idx),
+    })
+  );
+
+  res.json(processedFeedbacks);
+};
+
 const WORKER_COUNT = parseInt(process.env.WORKER_COUNT, 10) || 2;
 const inlineWorkerCode = `
   const { parentPort, workerData } = require('worker_threads');
@@ -121,51 +156,51 @@ const inlineWorkerCode = `
   });
 `;
 
-const getFeedback = async (req, res) => {
-  const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+// const getFeedback = async (req, res) => {
+//   const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
+//     method: "GET",
+//     headers: {
+//       Authorization: `Bearer ${token}`,
+//     },
+//   });
 
-  const response = await fetch(feedbackRequest);
-  const data = await response.json();
-  const feedbacks = data?.data || [];
-  const feedbackIds = feedbacks.map((item) => item.idx);
+//   const response = await fetch(feedbackRequest);
+//   const data = await response.json();
+//   const feedbacks = data?.data || [];
+//   const feedbackIds = feedbacks.map((item) => item.idx);
 
-  const associations = await Associations.find({
-    feedbacks: { $in: feedbackIds },
-  }).select("name email feedbacks");
+//   const associations = await Associations.find({
+//     feedbacks: { $in: feedbackIds },
+//   }).select("name email feedbacks");
 
-  const associationsJSON = JSON.stringify(associations);
+//   const associationsJSON = JSON.stringify(associations);
 
-  const chunkSize = Math.ceil(feedbacks.length / WORKER_COUNT);
-  const feedbackChunks = Array.from({ length: WORKER_COUNT }, (_, i) =>
-    feedbacks.slice(i * chunkSize, (i + 1) * chunkSize)
-  );
+//   const chunkSize = Math.ceil(feedbacks.length / WORKER_COUNT);
+//   const feedbackChunks = Array.from({ length: WORKER_COUNT }, (_, i) =>
+//     feedbacks.slice(i * chunkSize, (i + 1) * chunkSize)
+//   );
 
-  const workers = feedbackChunks.map((chunk, index) => {
-    return new Promise((resolve, reject) => {
-      const worker = new Worker(inlineWorkerCode, { eval: true });
-      console.log(`Worker ${worker.threadId} started`);
+//   const workers = feedbackChunks.map((chunk, index) => {
+//     return new Promise((resolve, reject) => {
+//       const worker = new Worker(inlineWorkerCode, { eval: true });
+//       console.log(`Worker ${worker.threadId} started`);
 
-      worker.postMessage({ feedbacks: chunk, associations: associationsJSON });
-      worker.on("message", (result) => {
-        console.log(`Worker ${worker.threadId} finished`);
-        resolve(result);
-      });
-      worker.on("error", reject);
-      worker.on("exit", (code) => {
-        if (code !== 0)
-          reject(new Error(`Worker stopped with exit code ${code}`));
-      });
-    });
-  });
+//       worker.postMessage({ feedbacks: chunk, associations: associationsJSON });
+//       worker.on("message", (result) => {
+//         console.log(`Worker ${worker.threadId} finished`);
+//         resolve(result);
+//       });
+//       worker.on("error", reject);
+//       worker.on("exit", (code) => {
+//         if (code !== 0)
+//           reject(new Error(`Worker stopped with exit code ${code}`));
+//       });
+//     });
+//   });
 
-  const results = await Promise.all(workers);
-  const processedFeedbacks = results.flat();
-  return res.json(processedFeedbacks);
-};
+//   const results = await Promise.all(workers);
+//   const processedFeedbacks = results.flat();
+//   return res.json(processedFeedbacks);
+// };
 
 module.exports = { processFeedback, getFeedback };

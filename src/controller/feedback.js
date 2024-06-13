@@ -17,7 +17,6 @@ const processFeedback = async (req, res) => {
   // Worker thread to fetch FEEDBACK URL response
   const fetchWorkerScript = `
     const { parentPort } = require('worker_threads');
-    const fetch = require('node-fetch');
 
     parentPort.on('message', async (createdIdea) => {
       try {
@@ -40,65 +39,36 @@ const processFeedback = async (req, res) => {
   const fetchWorker = new Worker(fetchWorkerScript, { eval: true });
   fetchWorker.postMessage(createdIdea);
 
-  // Worker thread to find existing entry
-  const workerScript = `
-    const { parentPort } = require('worker_threads');
-    const mongoose = require('mongoose');
-    const Associations = require('../model/feedbackOwner');
-
-    parentPort.on('message', async (email) => {
-      try {
-        const existingEntry = await Associations.findOne({ email: email });
-        parentPort.postMessage({ existingEntry });
-      } catch (error) {
-        parentPort.postMessage({ error: error.message });
+  const fetchData = await new Promise((resolve, reject) => {
+    fetchWorker.on("message", resolve);
+    fetchWorker.on("error", reject);
+    fetchWorker.on("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Fetch worker stopped with exit code ${code}`));
       }
     });
-  `;
-
-  const worker = new Worker(workerScript, { eval: true });
-  worker.postMessage(email);
-
-  const [fetchData, workerData] = await Promise.all([
-    new Promise((resolve, reject) => {
-      fetchWorker.on("message", resolve);
-      fetchWorker.on("error", reject);
-      fetchWorker.on("exit", (code) => {
-        if (code !== 0) {
-          reject(new Error(`Fetch worker stopped with exit code ${code}`));
-        }
-      });
-    }),
-    new Promise((resolve, reject) => {
-      worker.on("message", resolve);
-      worker.on("error", reject);
-      worker.on("exit", (code) => {
-        if (code !== 0) {
-          reject(new Error(`Worker stopped with exit code ${code}`));
-        }
-      });
-    }),
-  ]);
+  });
 
   const createdData = fetchData.data;
   const newIdeaID = createdData.data.idx;
-  const existingEntry = workerData.existingEntry;
 
-  if (existingEntry) {
-    existingEntry.feedbacks.push(newIdeaID);
-    await existingEntry.save();
-  } else {
-    await Associations.create({
-      name: name,
-      email: email,
-      feedbacks: [newIdeaID],
-    });
+  // Directly handle database operation in the main thread
+  try {
+    const existingEntry = await Associations.findOne({ email: email });
+    if (existingEntry) {
+      existingEntry.feedbacks.push(newIdeaID);
+      await existingEntry.save();
+    } else {
+      await Associations.create({
+        name: name,
+        email: email,
+        feedbacks: [newIdeaID],
+      });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 
-  res.header(
-    "Access-Control-Allow-Origin",
-    "https://feedback-webpage.vercel.app"
-  );
   res.status(201).json({
     message: "route functional",
     email,
@@ -109,7 +79,6 @@ const processFeedback = async (req, res) => {
     createdData,
   });
 };
-
 const ChokeData = async () => {
   const response = await fetch(
     "https://feedback-micro-service.onrender.com/api/v1/feedback/getfeedback"

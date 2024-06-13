@@ -38,6 +38,32 @@ npm test
 npm run dev
 ```
 
+# API routes
+
+/ => **GET** server Status
+
+/api/v1/feedback/getfeedback => **GET** get the list of all submited feedbacks
+
+/api/v1/feedback/submitFeedback => **POST** Post feedback object of type
+
+```
+{
+    "name": "xxxxxxx" <name of the author>
+    "email": "xxxx@xxxx.xx", <email id of the auhtor>
+    "summary": "test feedback", <title of the Feedback>
+    "idea": "final test of the service if the service is not working please wait 50s due to onRender spinning down free services when inactive", <Decreption of the feedback>
+    "topic": "topic_63p08yev" <topic of the feedback>
+}
+```
+
+**topics id**
+
+```
+  "topic_63p08yev" =>  "Product Usablity 💁‍♂️"
+  "topic_1djxlq13" => "Product Features ⚙️"
+  "topic_5d9ok81d" => "Product Pricing 💰"
+```
+
 Development utilities:
 
 - [nodemon](https://www.npmjs.com/package/nodemon)

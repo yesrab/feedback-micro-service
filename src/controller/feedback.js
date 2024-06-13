@@ -69,7 +69,7 @@ const processFeedback = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  res.status(201).json({
+  return res.status(201).json({
     message: "route functional",
     email,
     idea,
@@ -79,6 +79,7 @@ const processFeedback = async (req, res) => {
     createdData,
   });
 };
+
 const ChokeData = async () => {
   const response = await fetch(
     "https://feedback-micro-service.onrender.com/api/v1/feedback/getfeedback"

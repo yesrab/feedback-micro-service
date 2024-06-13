@@ -37,6 +37,10 @@ const processFeedback = async (req, res) => {
       feedbacks: [newIdeaID],
     });
   }
+  res.header(
+    "Access-Control-Allow-Origin",
+    "https://feedback-webpage.vercel.app"
+  );
   res.status(201).json({
     message: "route functional",
     email,

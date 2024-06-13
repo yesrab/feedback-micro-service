@@ -59,7 +59,7 @@ const getFeedback = async (req, res) => {
   const data = await response.json();
 
   const feedbacks = [];
-  const feedbackPromises = data.data.map(async (item) => {
+  const feedbackPromises = data?.data?.map(async (item) => {
     const rawBlock = {};
     rawBlock.name = item.name;
     rawBlock.description = item.description;
@@ -67,7 +67,7 @@ const getFeedback = async (req, res) => {
     const association = await Associations.findOne({
       feedbacks: item.idx,
     }).select("name email");
-    const topicNames = item?.topics.map((topic) => topic.name);
+    const topicNames = item?.topics?.map((topic) => topic.name);
     rawBlock.topics = topicNames;
     rawBlock.association = association;
     feedbacks.push(rawBlock);

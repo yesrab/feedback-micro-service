@@ -91,7 +91,6 @@ const processFeedback = async (req, res) => {
 // };
 
 const WORKER_COUNT = parseInt(process.env.WORKER_COUNT, 10) || 2;
-
 const inlineWorkerCode = `
   const { parentPort, workerData } = require('worker_threads');
 
@@ -146,11 +145,16 @@ const getFeedback = async (req, res) => {
     feedbacks.slice(i * chunkSize, (i + 1) * chunkSize)
   );
 
-  const workers = feedbackChunks.map((chunk) => {
+  const workers = feedbackChunks.map((chunk, index) => {
     return new Promise((resolve, reject) => {
       const worker = new Worker(inlineWorkerCode, { eval: true });
+      console.log(`Worker ${worker.threadId} started`);
+
       worker.postMessage({ feedbacks: chunk, associations: associationsJSON });
-      worker.on("message", resolve);
+      worker.on("message", (result) => {
+        console.log(`Worker ${worker.threadId} finished`);
+        resolve(result);
+      });
       worker.on("error", reject);
       worker.on("exit", (code) => {
         if (code !== 0)

@@ -90,15 +90,61 @@ const processFeedback = async (req, res) => {
 //   res.json(processedFeedbacks);
 // };
 
-const ChokeData = async () => {
-  const response = await fetch(
-    "https://feedback-micro-service.onrender.com/api/v1/feedback/getfeedback"
-  );
-  return response.json();
-};
+// const ChokeData = async () => {
+//   const response = await fetch(
+//     "https://feedback-micro-service.onrender.com/api/v1/feedback/getfeedback"
+//   );
+//   return response.json();
+// };
+// const getFeedback = async (req, res) => {
+//   const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 5000));
+//   const feedbackPromise = (async () => {
+//     const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
+//       method: "GET",
+//       headers: {
+//         Authorization: `Bearer ${token}`,
+//       },
+//     });
+//     const response = await fetch(feedbackRequest);
+//     console.log(response.status);
+//     const { data: feedbacks = [] } = await response.json();
+//     const feedbackIds = feedbacks.map((item) => item.idx);
+//     const [associations] = await Promise.all([
+//       Associations.find({ feedbacks: { $in: feedbackIds } }).select(
+//         "name email feedbacks"
+//       ),
+//     ]);
+//     const feedbackIdToAssociation = new Map();
+//     associations.forEach(({ name, email, feedbacks }) => {
+//       feedbacks.forEach((feedbackId) => {
+//         feedbackIdToAssociation.set(feedbackId, { name, email });
+//       });
+//     });
+//     const processedFeedbacks = feedbacks.map(
+//       ({ name, description, idx, topics = [] }) => ({
+//         name,
+//         description,
+//         idx,
+//         topics: topics.map((topic) => topic.name),
+//         association: feedbackIdToAssociation.get(idx),
+//       })
+//     );
+
+//     return processedFeedbacks;
+//   })();
+
+//   const result = await Promise.race([feedbackPromise, timeoutPromise]);
+//   if (result instanceof Array) {
+//     res.json(result);
+//   } else {
+//     const chokeData = await ChokeData();
+//     res.json(chokeData);
+//   }
+// };
+
 const getFeedback = async (req, res) => {
-  const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 5000));
-  const feedbackPromise = (async () => {
+  try {
+    // Fetch feedback data
     const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
       method: "GET",
       headers: {
@@ -106,20 +152,27 @@ const getFeedback = async (req, res) => {
       },
     });
     const response = await fetch(feedbackRequest);
-    console.log(response.status);
     const { data: feedbacks = [] } = await response.json();
+
+    // Extract feedback IDs
     const feedbackIds = feedbacks.map((item) => item.idx);
+
+    // Fetch associations in parallel
     const [associations] = await Promise.all([
       Associations.find({ feedbacks: { $in: feedbackIds } }).select(
         "name email feedbacks"
       ),
     ]);
+
+    // Create a map for feedback ID to association
     const feedbackIdToAssociation = new Map();
     associations.forEach(({ name, email, feedbacks }) => {
       feedbacks.forEach((feedbackId) => {
         feedbackIdToAssociation.set(feedbackId, { name, email });
       });
     });
+
+    // Process feedbacks
     const processedFeedbacks = feedbacks.map(
       ({ name, description, idx, topics = [] }) => ({
         name,
@@ -130,15 +183,11 @@ const getFeedback = async (req, res) => {
       })
     );
 
-    return processedFeedbacks;
-  })();
-
-  const result = await Promise.race([feedbackPromise, timeoutPromise]);
-  if (result instanceof Array) {
-    res.json(result);
-  } else {
-    const chokeData = await ChokeData();
-    res.json(chokeData);
+    // Send the processed feedbacks as a JSON response
+    res.json(processedFeedbacks);
+  } catch (error) {
+    // Error handling
+    res.status(500).json({ error: error.message });
   }
 };
 

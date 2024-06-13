@@ -1,5 +1,7 @@
 const token = process.env.FRILL_TOKEN;
 const admin = "follower_305mwn9j";
+const { Worker } = require("worker_threads");
+const path = require("path");
 const Associations = require("../model/feedbackOwner");
 const processFeedback = async (req, res) => {
   const { email, idea, name, summary, topic } = req.body;
@@ -48,6 +50,78 @@ const processFeedback = async (req, res) => {
   });
 };
 
+// const getFeedback = async (req, res) => {
+//   const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
+//     method: "GET",
+//     headers: {
+//       Authorization: `Bearer ${token}`,
+//     },
+//   });
+//   const response = await fetch(feedbackRequest);
+//   const data = await response.json();
+
+//   const feedbacks = data?.data || [];
+//   const feedbackIds = feedbacks.map((item) => item.idx);
+
+//   const associations = await Associations.find({
+//     feedbacks: { $in: feedbackIds },
+//   }).select("name email feedbacks");
+
+//   const feedbackIdToAssociation = {};
+//   associations.forEach((assoc) => {
+//     assoc.feedbacks.forEach((feedbackId) => {
+//       feedbackIdToAssociation[feedbackId] = {
+//         name: assoc.name,
+//         email: assoc.email,
+//       };
+//     });
+//   });
+
+//   const processedFeedbacks = feedbacks.map((item) => {
+//     return {
+//       name: item.name,
+//       description: item.description,
+//       idx: item.idx,
+//       topics: item.topics ? item.topics.map((topic) => topic.name) : [],
+//       association: feedbackIdToAssociation[item.idx],
+//     };
+//   });
+
+//   res.json(processedFeedbacks);
+// };
+
+const WORKER_COUNT = parseInt(process.env.WORKER_COUNT, 10) || 2;
+
+const inlineWorkerCode = `
+  const { parentPort, workerData } = require('worker_threads');
+
+  parentPort.on('message', ({ feedbacks, associations }) => {
+    const feedbackIdToAssociation = {};
+    const parsedAssociations = JSON.parse(associations);
+
+    parsedAssociations.forEach((assoc) => {
+      assoc.feedbacks.forEach((feedbackId) => {
+        feedbackIdToAssociation[feedbackId] = {
+          name: assoc.name,
+          email: assoc.email,
+        };
+      });
+    });
+
+    const processedFeedbacks = feedbacks.map((item) => {
+      return {
+        name: item.name,
+        description: item.description,
+        idx: item.idx,
+        topics: item.topics ? item.topics.map((topic) => topic.name) : [],
+        association: feedbackIdToAssociation[item.idx],
+      };
+    });
+
+    parentPort.postMessage(processedFeedbacks);
+  });
+`;
+
 const getFeedback = async (req, res) => {
   const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
     method: "GET",
@@ -55,9 +129,9 @@ const getFeedback = async (req, res) => {
       Authorization: `Bearer ${token}`,
     },
   });
+
   const response = await fetch(feedbackRequest);
   const data = await response.json();
-
   const feedbacks = data?.data || [];
   const feedbackIds = feedbacks.map((item) => item.idx);
 
@@ -65,26 +139,33 @@ const getFeedback = async (req, res) => {
     feedbacks: { $in: feedbackIds },
   }).select("name email feedbacks");
 
-  const feedbackIdToAssociation = {};
-  associations.forEach((assoc) => {
-    assoc.feedbacks.forEach((feedbackId) => {
-      feedbackIdToAssociation[feedbackId] = {
-        name: assoc.name,
-        email: assoc.email,
-      };
+  const associationsJSON = JSON.stringify(associations);
+
+  const chunkSize = Math.ceil(feedbacks.length / WORKER_COUNT);
+  const feedbackChunks = Array.from({ length: WORKER_COUNT }, (_, i) =>
+    feedbacks.slice(i * chunkSize, (i + 1) * chunkSize)
+  );
+
+  const workers = feedbackChunks.map((chunk) => {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(inlineWorkerCode, { eval: true });
+      worker.postMessage({ feedbacks: chunk, associations: associationsJSON });
+      worker.on("message", resolve);
+      worker.on("error", reject);
+      worker.on("exit", (code) => {
+        if (code !== 0)
+          reject(new Error(`Worker stopped with exit code ${code}`));
+      });
     });
   });
 
-  const processedFeedbacks = feedbacks.map((item) => {
-    return {
-      name: item.name,
-      description: item.description,
-      idx: item.idx,
-      topics: item.topics ? item.topics.map((topic) => topic.name) : [],
-      association: feedbackIdToAssociation[item.idx],
-    };
-  });
-
-  res.json(processedFeedbacks);
+  try {
+    const results = await Promise.all(workers);
+    const processedFeedbacks = results.flat();
+    res.json(processedFeedbacks);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
+
 module.exports = { processFeedback, getFeedback };

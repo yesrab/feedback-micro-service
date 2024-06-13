@@ -165,7 +165,7 @@ const getFeedback = async (req, res) => {
 
   const results = await Promise.all(workers);
   const processedFeedbacks = results.flat();
-  res.json(processedFeedbacks);
+  return res.json(processedFeedbacks);
 };
 
 module.exports = { processFeedback, getFeedback };

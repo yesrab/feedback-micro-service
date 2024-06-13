@@ -58,23 +58,33 @@ const getFeedback = async (req, res) => {
   const response = await fetch(feedbackRequest);
   const data = await response.json();
 
-  const feedbacks = [];
-  const feedbackPromises = data?.data?.map(async (item) => {
-    const rawBlock = {};
-    rawBlock.name = item.name;
-    rawBlock.description = item.description;
-    rawBlock.idx = item.idx;
-    const association = await Associations.findOne({
-      feedbacks: item.idx,
-    }).select("name email");
-    const topicNames = item?.topics?.map((topic) => topic.name);
-    rawBlock.topics = topicNames;
-    rawBlock.association = association;
-    feedbacks.push(rawBlock);
+  const feedbacks = data?.data || [];
+  const feedbackIds = feedbacks.map((item) => item.idx);
+
+  const associations = await Associations.find({
+    feedbacks: { $in: feedbackIds },
+  }).select("name email feedbacks");
+
+  const feedbackIdToAssociation = {};
+  associations.forEach((assoc) => {
+    assoc.feedbacks.forEach((feedbackId) => {
+      feedbackIdToAssociation[feedbackId] = {
+        name: assoc.name,
+        email: assoc.email,
+      };
+    });
   });
-  await Promise.all(feedbackPromises);
 
-  res.json(feedbacks);
+  const processedFeedbacks = feedbacks.map((item) => {
+    return {
+      name: item.name,
+      description: item.description,
+      idx: item.idx,
+      topics: item.topics ? item.topics.map((topic) => topic.name) : [],
+      association: feedbackIdToAssociation[item.idx],
+    };
+  });
+
+  res.json(processedFeedbacks);
 };
-
 module.exports = { processFeedback, getFeedback };

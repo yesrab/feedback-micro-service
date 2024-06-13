@@ -13,20 +13,77 @@ const processFeedback = async (req, res) => {
     author_idx: admin,
     topic_idxs: [topic],
   };
-  const createFeedbackRequest = new Request(FEEDBACKURL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify(createdIdea),
-  });
-  const [createdResponse, existingEntry] = await Promise.all([
-    fetch(createFeedbackRequest),
-    Associations.findOne({ email: email }),
+
+  // Worker thread to fetch FEEDBACK URL response
+  const fetchWorkerScript = `
+    const { parentPort } = require('worker_threads');
+    const fetch = require('node-fetch');
+
+    parentPort.on('message', async (createdIdea) => {
+      try {
+        const response = await fetch("${FEEDBACKURL}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer ${token}"
+          },
+          body: JSON.stringify(createdIdea)
+        });
+        const data = await response.json();
+        parentPort.postMessage({ data });
+      } catch (error) {
+        parentPort.postMessage({ error: error.message });
+      }
+    });
+  `;
+
+  const fetchWorker = new Worker(fetchWorkerScript, { eval: true });
+  fetchWorker.postMessage(createdIdea);
+
+  // Worker thread to find existing entry
+  const workerScript = `
+    const { parentPort } = require('worker_threads');
+    const mongoose = require('mongoose');
+    const Associations = require('../model/feedbackOwner');
+
+    parentPort.on('message', async (email) => {
+      try {
+        const existingEntry = await Associations.findOne({ email: email });
+        parentPort.postMessage({ existingEntry });
+      } catch (error) {
+        parentPort.postMessage({ error: error.message });
+      }
+    });
+  `;
+
+  const worker = new Worker(workerScript, { eval: true });
+  worker.postMessage(email);
+
+  const [fetchData, workerData] = await Promise.all([
+    new Promise((resolve, reject) => {
+      fetchWorker.on("message", resolve);
+      fetchWorker.on("error", reject);
+      fetchWorker.on("exit", (code) => {
+        if (code !== 0) {
+          reject(new Error(`Fetch worker stopped with exit code ${code}`));
+        }
+      });
+    }),
+    new Promise((resolve, reject) => {
+      worker.on("message", resolve);
+      worker.on("error", reject);
+      worker.on("exit", (code) => {
+        if (code !== 0) {
+          reject(new Error(`Worker stopped with exit code ${code}`));
+        }
+      });
+    }),
   ]);
-  const createdData = await createdResponse.json();
+
+  const createdData = fetchData.data;
   const newIdeaID = createdData.data.idx;
+  const existingEntry = workerData.existingEntry;
+
   if (existingEntry) {
     existingEntry.feedbacks.push(newIdeaID);
     await existingEntry.save();
@@ -37,6 +94,7 @@ const processFeedback = async (req, res) => {
       feedbacks: [newIdeaID],
     });
   }
+
   res.header(
     "Access-Control-Allow-Origin",
     "https://feedback-webpage.vercel.app"
@@ -141,84 +199,6 @@ const getFeedback = async (req, res) => {
 //     // Error handling
 //     res.status(500).json({ error: error.message });
 //   }
-// };
-
-const WORKER_COUNT = parseInt(process.env.WORKER_COUNT, 10) || 2;
-const inlineWorkerCode = `
-  const { parentPort, workerData } = require('worker_threads');
-
-  parentPort.on('message', ({ feedbacks, associations }) => {
-    const feedbackIdToAssociation = {};
-    const parsedAssociations = JSON.parse(associations);
-
-    parsedAssociations.forEach((assoc) => {
-      assoc.feedbacks.forEach((feedbackId) => {
-        feedbackIdToAssociation[feedbackId] = {
-          name: assoc.name,
-          email: assoc.email,
-        };
-      });
-    });
-
-    const processedFeedbacks = feedbacks.map((item) => {
-      return {
-        name: item.name,
-        description: item.description,
-        idx: item.idx,
-        topics: item.topics ? item.topics.map((topic) => topic.name) : [],
-        association: feedbackIdToAssociation[item.idx],
-      };
-    });
-
-    parentPort.postMessage(processedFeedbacks);
-  });
-`;
-
-// const getFeedback = async (req, res) => {
-//   const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
-//     method: "GET",
-//     headers: {
-//       Authorization: `Bearer ${token}`,
-//     },
-//   });
-
-//   const response = await fetch(feedbackRequest);
-//   const data = await response.json();
-//   const feedbacks = data?.data || [];
-//   const feedbackIds = feedbacks.map((item) => item.idx);
-
-//   const associations = await Associations.find({
-//     feedbacks: { $in: feedbackIds },
-//   }).select("name email feedbacks");
-
-//   const associationsJSON = JSON.stringify(associations);
-
-//   const chunkSize = Math.ceil(feedbacks.length / WORKER_COUNT);
-//   const feedbackChunks = Array.from({ length: WORKER_COUNT }, (_, i) =>
-//     feedbacks.slice(i * chunkSize, (i + 1) * chunkSize)
-//   );
-
-//   const workers = feedbackChunks.map((chunk, index) => {
-//     return new Promise((resolve, reject) => {
-//       const worker = new Worker(inlineWorkerCode, { eval: true });
-//       console.log(`Worker ${worker.threadId} started`);
-
-//       worker.postMessage({ feedbacks: chunk, associations: associationsJSON });
-//       worker.on("message", (result) => {
-//         console.log(`Worker ${worker.threadId} finished`);
-//         resolve(result);
-//       });
-//       worker.on("error", reject);
-//       worker.on("exit", (code) => {
-//         if (code !== 0)
-//           reject(new Error(`Worker stopped with exit code ${code}`));
-//       });
-//     });
-//   });
-
-//   const results = await Promise.all(workers);
-//   const processedFeedbacks = results.flat();
-//   return res.json(processedFeedbacks);
 // };
 
 module.exports = { processFeedback, getFeedback };

@@ -3,17 +3,16 @@ const admin = "follower_305mwn9j";
 const { Worker } = require("worker_threads");
 const path = require("path");
 const Associations = require("../model/feedbackOwner");
+
 const processFeedback = async (req, res) => {
   const { email, idea, name, summary, topic } = req.body;
   const FEEDBACKURL = "https://api.frill.co/v1/ideas/";
-
   const createdIdea = {
     name: summary,
     description: idea,
     author_idx: admin,
     topic_idxs: [topic],
   };
-
   const createFeedbackRequest = new Request(FEEDBACKURL, {
     method: "POST",
     headers: {
@@ -22,18 +21,17 @@ const processFeedback = async (req, res) => {
     },
     body: JSON.stringify(createdIdea),
   });
-
-  const createdResponse = await fetch(createFeedbackRequest);
+  const [createdResponse, existingEntry] = await Promise.all([
+    fetch(createFeedbackRequest),
+    Associations.findOne({ email: email }),
+  ]);
   const createdData = await createdResponse.json();
-
   const newIdeaID = createdData.data.idx;
-
-  const existingEntry = await Associations.findOne({ email: email });
   if (existingEntry) {
     existingEntry.feedbacks.push(newIdeaID);
     await existingEntry.save();
   } else {
-    const syncData = await Associations.create({
+    await Associations.create({
       name: name,
       email: email,
       feedbacks: [newIdeaID],
@@ -89,10 +87,8 @@ const getFeedback = async (req, res) => {
         association: feedbackIdToAssociation.get(idx),
       })
     );
-
     return processedFeedbacks;
   })();
-
   const result = await Promise.race([feedbackPromise, timeoutPromise]);
   if (result instanceof Array) {
     res.json(result);
@@ -104,7 +100,6 @@ const getFeedback = async (req, res) => {
 
 // const getFeedback = async (req, res) => {
 //   try {
-//     // Fetch feedback data
 //     const feedbackRequest = new Request("https://api.frill.co/v1/ideas", {
 //       method: "GET",
 //       headers: {
@@ -113,26 +108,19 @@ const getFeedback = async (req, res) => {
 //     });
 //     const response = await fetch(feedbackRequest);
 //     const { data: feedbacks = [] } = await response.json();
-
-//     // Extract feedback IDs
 //     const feedbackIds = feedbacks.map((item) => item.idx);
-
-//     // Fetch associations in parallel
 //     const [associations] = await Promise.all([
 //       Associations.find({ feedbacks: { $in: feedbackIds } }).select(
 //         "name email feedbacks"
 //       ),
 //     ]);
 
-//     // Create a map for feedback ID to association
 //     const feedbackIdToAssociation = new Map();
 //     associations.forEach(({ name, email, feedbacks }) => {
 //       feedbacks.forEach((feedbackId) => {
 //         feedbackIdToAssociation.set(feedbackId, { name, email });
 //       });
 //     });
-
-//     // Process feedbacks
 //     const processedFeedbacks = feedbacks.map(
 //       ({ name, description, idx, topics = [] }) => ({
 //         name,
